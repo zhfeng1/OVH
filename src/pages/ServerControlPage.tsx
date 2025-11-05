@@ -235,6 +235,28 @@ const ServerControlPage: React.FC = () => {
   const [contactTech, setContactTech] = useState('');
   const [contactBilling, setContactBilling] = useState('');
   const [loadingChangeContact, setLoadingChangeContact] = useState(false);
+  
+  // 联系人变更请求管理
+  interface ContactChangeRequest {
+    id: number;
+    askingAccount?: string;
+    contactTypes: string[];
+    dateDone?: string;
+    dateRequest: string;
+    fromAccount?: string;
+    serviceDomain?: string;
+    state: string;
+    toAccount?: string;
+  }
+  
+  const [contactChangeRequests, setContactChangeRequests] = useState<ContactChangeRequest[]>([]);
+  const [loadingContactRequests, setLoadingContactRequests] = useState(false);
+  const [loadingTokenAction, setLoadingTokenAction] = useState(false);
+  const [contactDialogTab, setContactDialogTab] = useState<'submit' | 'requests'>('submit');
+  const [showTokenDialog, setShowTokenDialog] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<ContactChangeRequest | null>(null);
+  const [tokenAction, setTokenAction] = useState<'accept' | 'refuse' | null>(null);
+  const [token, setToken] = useState('');
 
   // 加载 BIOS 设置
   const fetchBiosSettings = async () => {
@@ -1144,7 +1166,97 @@ const ServerControlPage: React.FC = () => {
     setContactTech('');
     setContactBilling('');
     setShowChangeContactDialog(true);
+    // 同时加载联系人变更请求列表
+    fetchContactChangeRequests();
   };
+
+  // 获取联系人变更请求列表
+  const fetchContactChangeRequests = async () => {
+    setLoadingContactRequests(true);
+    try {
+      const response = await api.get('/ovh/contact-change-requests');
+      if (response.data.status === 'success') {
+        setContactChangeRequests(response.data.data || []);
+      }
+    } catch (error: any) {
+      console.error('获取联系人变更请求列表失败:', error);
+      showToast({
+        type: 'error',
+        title: '获取联系人变更请求列表失败',
+        message: error.response?.data?.message || error.message
+      });
+    } finally {
+      setLoadingContactRequests(false);
+    }
+  };
+
+  // 打开 token 输入对话框
+  const openTokenDialog = (request: ContactChangeRequest, action: 'accept' | 'refuse') => {
+    setSelectedRequest(request);
+    setTokenAction(action);
+    setToken('');
+    setShowTokenDialog(true);
+  };
+
+  // 处理接受/拒绝请求
+  const handleTokenAction = async () => {
+    if (!selectedRequest || !tokenAction || !token) return;
+    
+    setLoadingTokenAction(true);
+    try {
+      const endpoint = tokenAction === 'accept' 
+        ? `/ovh/contact-change-requests/${selectedRequest.id}/accept`
+        : `/ovh/contact-change-requests/${selectedRequest.id}/refuse`;
+      
+      const response = await api.post(endpoint, { token });
+      
+      if (response.data.status === 'success') {
+        showToast({
+          type: 'success',
+          title: tokenAction === 'accept' ? '请求已接受' : '请求已拒绝',
+          message: response.data.message
+        });
+        setShowTokenDialog(false);
+        setToken('');
+        setTokenAction(null);
+        setSelectedRequest(null);
+        // 刷新请求列表
+        fetchContactChangeRequests();
+      }
+    } catch (error: any) {
+      console.error(`${tokenAction === 'accept' ? '接受' : '拒绝'}请求失败:`, error);
+      showToast({
+        type: 'error',
+        title: `${tokenAction === 'accept' ? '接受' : '拒绝'}请求失败`,
+        message: error.response?.data?.message || error.message
+      });
+    } finally {
+      setLoadingTokenAction(false);
+    }
+  };
+
+  // 重发邮件
+  const handleResendEmail = async (request: ContactChangeRequest) => {
+    try {
+      const response = await api.post(`/ovh/contact-change-requests/${request.id}/resend-email`);
+      
+      if (response.data.status === 'success') {
+        showToast({
+          type: 'success',
+          title: '邮件已重发',
+          message: response.data.message
+        });
+      }
+    } catch (error: any) {
+      console.error('重发邮件失败:', error);
+      showToast({
+        type: 'error',
+        title: '重发邮件失败',
+        message: error.response?.data?.message || error.message
+      });
+    }
+  };
+
 
   // IPMI控制台
   const openIPMIConsole = async () => {
@@ -3642,7 +3754,7 @@ const ServerControlPage: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="cyber-card max-w-lg w-full max-h-[90vh] overflow-y-auto">
+                className="cyber-card max-w-4xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Mail className="w-5 h-5 text-green-400" />
@@ -3656,16 +3768,40 @@ const ServerControlPage: React.FC = () => {
                       setContactAdmin('');
                       setContactTech('');
                       setContactBilling('');
+                      setContactDialogTab('submit');
                     }}
                     className="text-cyber-muted hover:text-cyber-text transition-colors">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <p className="text-cyber-muted text-sm mb-4">
-                  为 {selectedServer?.name} ({selectedServer?.serviceName}) 变更联系人信息
-                </p>
+                {/* 标签页 */}
+                <div className="flex gap-2 mb-4 border-b border-cyber-accent/20">
+                  <button
+                    onClick={() => setContactDialogTab('submit')}
+                    className={`px-4 py-2 font-medium transition-colors ${
+                      contactDialogTab === 'submit'
+                        ? 'text-green-400 border-b-2 border-green-400'
+                        : 'text-cyber-muted hover:text-cyber-text'
+                    }`}>
+                    提交变更
+                  </button>
+                  <button
+                    onClick={() => {
+                      setContactDialogTab('requests');
+                      fetchContactChangeRequests();
+                    }}
+                    className={`px-4 py-2 font-medium transition-colors ${
+                      contactDialogTab === 'requests'
+                        ? 'text-green-400 border-b-2 border-green-400'
+                        : 'text-cyber-muted hover:text-cyber-text'
+                    }`}>
+                    管理请求 ({contactChangeRequests.length})
+                  </button>
+                </div>
 
+                {/* 提交变更标签页 */}
+                {contactDialogTab === 'submit' && (
                 <div className="space-y-4">
                   {/* 管理员联系人 */}
                   <div>
@@ -3760,6 +3896,7 @@ const ServerControlPage: React.FC = () => {
                         setContactAdmin('');
                         setContactTech('');
                         setContactBilling('');
+                        setContactDialogTab('submit');
                       }}
                       disabled={loadingChangeContact}
                       className="px-4 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50">
@@ -3774,9 +3911,229 @@ const ServerControlPage: React.FC = () => {
                     </button>
                   </div>
                 </div>
+                )}
+
+                {/* 管理请求标签页 */}
+                {contactDialogTab === 'requests' && (
+                  <div className="space-y-4">
+                    {/* 刷新按钮 */}
+                    <div className="flex justify-end">
+                      <button
+                        onClick={fetchContactChangeRequests}
+                        disabled={loadingContactRequests}
+                        className="px-3 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50 flex items-center gap-2 text-sm">
+                        <RefreshCw className={`w-4 h-4 ${loadingContactRequests ? 'animate-spin' : ''}`} />
+                        刷新
+                      </button>
+                    </div>
+
+                    {/* 请求列表 */}
+                    {loadingContactRequests ? (
+                      <div className="flex justify-center items-center py-8">
+                        <RefreshCw className="w-6 h-6 animate-spin text-cyber-accent" />
+                      </div>
+                    ) : contactChangeRequests.length === 0 ? (
+                      <div className="text-center py-8 text-cyber-muted">
+                        暂无联系人变更请求
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                        {contactChangeRequests.map((request) => (
+                          <div
+                            key={request.id}
+                            className="bg-cyber-grid/30 border border-cyber-accent/30 rounded-lg p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-sm font-semibold text-cyber-text">
+                                    请求 ID: {request.id}
+                                  </span>
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    request.state === 'done' ? 'bg-green-500/20 text-green-400' :
+                                    request.state === 'todo' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    request.state === 'doing' ? 'bg-blue-500/20 text-blue-400' :
+                                    request.state === 'validatingByCustomers' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {request.state === 'done' ? '已完成' :
+                                     request.state === 'todo' ? '待处理' :
+                                     request.state === 'doing' ? '处理中' :
+                                     request.state === 'validatingByCustomers' ? '等待验证' :
+                                     request.state}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-cyber-muted space-y-1">
+                                  {request.serviceDomain && (
+                                    <div>服务: {request.serviceDomain}</div>
+                                  )}
+                                  {request.fromAccount && (
+                                    <div>原账户: {request.fromAccount}</div>
+                                  )}
+                                  {request.toAccount && (
+                                    <div>目标账户: {request.toAccount}</div>
+                                  )}
+                                  {request.askingAccount && (
+                                    <div>请求账户: {request.askingAccount}</div>
+                                  )}
+                                  <div>联系人类型: {request.contactTypes.join(', ')}</div>
+                                  <div>请求时间: {new Date(request.dateRequest).toLocaleString('zh-CN')}</div>
+                                  {request.dateDone && (
+                                    <div>完成时间: {new Date(request.dateDone).toLocaleString('zh-CN')}</div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {/* 操作按钮 - 显示在待处理或等待验证状态 */}
+                            {(request.state === 'todo' || request.state === 'validatingByCustomers') && (
+                              <>
+                                {/* 提示信息 */}
+                                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mt-3">
+                                  <div className="flex items-start gap-2">
+                                    <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                                    <div className="text-xs text-blue-300">
+                                      <p className="font-semibold mb-1">操作提示：</p>
+                                      <p>点击"接受"或"拒绝"按钮后，需要输入从邮件中获取的 token 值。如果未收到邮件，请点击"重发邮件"按钮。</p>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex gap-2 mt-3 pt-3 border-t border-cyber-accent/20">
+                                  <button
+                                    onClick={() => openTokenDialog(request, 'accept')}
+                                    className="flex-1 px-3 py-2 bg-green-500/20 border border-green-500/50 rounded-lg text-green-400 hover:bg-green-500/30 text-sm transition-colors">
+                                    接受
+                                  </button>
+                                  <button
+                                    onClick={() => openTokenDialog(request, 'refuse')}
+                                    className="flex-1 px-3 py-2 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 hover:bg-red-500/30 text-sm transition-colors">
+                                    拒绝
+                                  </button>
+                                  <button
+                                    onClick={() => handleResendEmail(request)}
+                                    className="px-3 py-2 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 text-sm transition-colors">
+                                    重发邮件
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </motion.div>
             </div>
           )}
+
+          {/* Token 输入对话框 */}
+          {showTokenDialog && selectedRequest && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="cyber-card max-w-md w-full">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-5 h-5 text-green-400" />
+                    <h3 className="text-xl font-semibold text-cyber-text">
+                      {tokenAction === 'accept' ? '接受' : '拒绝'}联系人变更请求
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowTokenDialog(false);
+                      setToken('');
+                      setTokenAction(null);
+                      setSelectedRequest(null);
+                    }}
+                    className="text-cyber-muted hover:text-cyber-text transition-colors">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-cyber-grid/30 border border-cyber-accent/30 rounded-lg p-3 mb-4">
+                    <div className="text-sm text-cyber-muted space-y-1">
+                      <div>请求 ID: {selectedRequest.id}</div>
+                      {selectedRequest.serviceDomain && (
+                        <div>服务: {selectedRequest.serviceDomain}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-cyber-text font-medium mb-2">
+                      验证 Token（从邮件中获取）
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="请输入邮件中的 token"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      className="w-full px-4 py-3 bg-cyber-bg border-2 border-cyber-accent/40 rounded-lg text-cyber-text placeholder-cyber-muted focus:border-cyber-accent focus:ring-2 focus:ring-cyber-accent/30 hover:border-cyber-accent/60 transition-all"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%)'
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && token && !loadingTokenAction) {
+                          handleTokenAction();
+                        }
+                      }}
+                    />
+                    <p className="text-xs text-cyber-muted mt-1">
+                      请在收到的确认邮件中查找 token 值
+                    </p>
+                  </div>
+
+                  <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-yellow-300">
+                        <p className="font-semibold mb-2">如何获取 Token：</p>
+                        <ol className="list-decimal list-inside space-y-1 ml-2">
+                          <li>检查您的邮箱，查找 OVH 发送的联系人变更确认邮件</li>
+                          <li>在邮件中找到 "using the following token:" 后面的 token 值</li>
+                          <li>或者从邮件中的确认链接 URL 中提取 token（URL 参数中的 token=xxx）</li>
+                          <li>将 token 值复制并粘贴到上面的输入框中</li>
+                        </ol>
+                        <p className="mt-2 text-xs opacity-90">
+                          示例：邮件中会显示类似 "PIgjlgCopAaisey3gexfq8fukvQFKAMW" 的 token 值
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 mt-6">
+                    <button
+                      onClick={() => {
+                        setShowTokenDialog(false);
+                        setToken('');
+                        setTokenAction(null);
+                        setSelectedRequest(null);
+                      }}
+                      disabled={loadingTokenAction}
+                      className="px-4 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50">
+                      取消
+                    </button>
+                    <button
+                      onClick={handleTokenAction}
+                      disabled={loadingTokenAction || !token}
+                      className={`px-4 py-2 rounded-lg text-white disabled:opacity-50 flex items-center gap-2 ${
+                        tokenAction === 'accept'
+                          ? 'bg-green-500 hover:bg-green-600'
+                          : 'bg-red-500 hover:bg-red-600'
+                      }`}>
+                      {loadingTokenAction && <RefreshCw className="w-4 h-4 animate-spin" />}
+                      {tokenAction === 'accept' ? '确认接受' : '确认拒绝'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
         </AnimatePresence>,
         document.body
       )}

@@ -36,3 +36,19 @@ docker-compose up -d --build
 ---
 
 **就这么简单！** ✨
+
+---
+
+## 致谢
+
+感谢以下人员和组织的协助与支持：
+
+- [@szzc1227](https://t.me/szzc1227) - 协助测试
+- [@mtrucc](https://github.com/mtrucc) - 技术支持
+
+## 社区
+
+- **OVH 群组：** [https://t.me/OVHGroup](https://t.me/OVHGroup) - OVH 中文用户交流分享群组
+
+
+

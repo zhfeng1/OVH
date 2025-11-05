@@ -6914,6 +6914,203 @@ def get_credit_balance():
             "message": f"获取信用余额失败: {str(e)}"
         }), 500
 
+@app.route('/api/ovh/account/email-history', methods=['GET', 'OPTIONS'])
+def get_email_history():
+    """获取邮件历史 - GET /me/notification/email/history"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        # 获取邮件ID列表
+        email_ids = client.get('/me/notification/email/history')
+        
+        # 反转列表，获取最新的邮件（ID通常是递增的，所以反转后最新的在前）
+        email_ids = list(reversed(email_ids))
+        
+        # 获取每封邮件的详细信息
+        emails = []
+        # 限制最多获取50封邮件，避免请求过多
+        for email_id in email_ids[:50]:
+            try:
+                email_detail = client.get(f'/me/notification/email/history/{email_id}')
+                emails.append(email_detail)
+            except Exception as e:
+                add_log("WARNING", f"获取邮件 {email_id} 详情失败: {str(e)}", "account_management")
+        
+        add_log("INFO", f"成功获取 {len(emails)} 封邮件（总共 {len(email_ids)} 封）", "account_management")
+        return jsonify({
+            "status": "success",
+            "data": emails
+        })
+    except Exception as e:
+        add_log("ERROR", f"获取邮件历史失败: {str(e)}", "account_management")
+        return jsonify({
+            "status": "error",
+            "message": f"获取邮件历史失败: {str(e)}"
+        }), 500
+
+@app.route('/api/ovh/contact-change-requests', methods=['GET', 'OPTIONS'])
+def get_contact_change_requests():
+    """获取联系人变更请求列表 - GET /me/task/contactChange"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        # 获取联系人变更请求ID列表
+        task_ids = client.get('/me/task/contactChange')
+        
+        # 获取每个请求的详细信息
+        tasks = []
+        for task_id in task_ids:
+            try:
+                task_detail = client.get(f'/me/task/contactChange/{task_id}')
+                # 记录任务详情以调试（检查是否有token字段）
+                add_log("DEBUG", f"任务 {task_id} 详情字段: {list(task_detail.keys())}", "server_control")
+                tasks.append(task_detail)
+            except Exception as e:
+                add_log("WARNING", f"获取联系人变更请求 {task_id} 详情失败: {str(e)}", "server_control")
+        
+        # 按请求日期倒序排列（最新的在前）
+        tasks.sort(key=lambda x: x.get('dateRequest', ''), reverse=True)
+        
+        add_log("INFO", f"成功获取 {len(tasks)} 个联系人变更请求", "server_control")
+        return jsonify({
+            "status": "success",
+            "data": tasks
+        })
+    except Exception as e:
+        add_log("ERROR", f"获取联系人变更请求列表失败: {str(e)}", "server_control")
+        return jsonify({
+            "status": "error",
+            "message": f"获取联系人变更请求列表失败: {str(e)}"
+        }), 500
+
+@app.route('/api/ovh/contact-change-requests/<int:task_id>', methods=['GET', 'OPTIONS'])
+def get_contact_change_request_detail(task_id):
+    """获取联系人变更请求详情 - GET /me/task/contactChange/{id}"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        task_detail = client.get(f'/me/task/contactChange/{task_id}')
+        add_log("INFO", f"成功获取联系人变更请求 {task_id} 详情", "server_control")
+        return jsonify({
+            "status": "success",
+            "data": task_detail
+        })
+    except Exception as e:
+        add_log("ERROR", f"获取联系人变更请求 {task_id} 详情失败: {str(e)}", "server_control")
+        return jsonify({
+            "status": "error",
+            "message": f"获取联系人变更请求详情失败: {str(e)}"
+        }), 500
+
+@app.route('/api/ovh/contact-change-requests/<int:task_id>/accept', methods=['POST', 'OPTIONS'])
+def accept_contact_change_request(task_id):
+    """接受联系人变更请求 - POST /me/task/contactChange/{id}/accept"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        data = request.get_json() or {}
+        token = data.get('token')
+        
+        # 检查是否提供了 token
+        if not token:
+            return jsonify({
+                "status": "error",
+                "message": "缺少必需的 token 参数。请从邮件中获取 token 并输入。"
+            }), 400
+        
+        # 使用提供的 token 调用
+        client.post(f'/me/task/contactChange/{task_id}/accept', token=token)
+        add_log("INFO", f"成功接受联系人变更请求 {task_id}", "server_control")
+        return jsonify({
+            "status": "success",
+            "message": "联系人变更请求已接受"
+        })
+    except Exception as e:
+        add_log("ERROR", f"接受联系人变更请求 {task_id} 失败: {str(e)}", "server_control")
+        return jsonify({
+            "status": "error",
+            "message": f"接受联系人变更请求失败: {str(e)}"
+        }), 500
+
+@app.route('/api/ovh/contact-change-requests/<int:task_id>/refuse', methods=['POST', 'OPTIONS'])
+def refuse_contact_change_request(task_id):
+    """拒绝联系人变更请求 - POST /me/task/contactChange/{id}/refuse"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        data = request.get_json() or {}
+        token = data.get('token')
+        
+        # 检查是否提供了 token
+        if not token:
+            return jsonify({
+                "status": "error",
+                "message": "缺少必需的 token 参数。请从邮件中获取 token 并输入。"
+            }), 400
+        
+        # 使用提供的 token 调用
+        client.post(f'/me/task/contactChange/{task_id}/refuse', token=token)
+        add_log("INFO", f"成功拒绝联系人变更请求 {task_id}", "server_control")
+        return jsonify({
+            "status": "success",
+            "message": "联系人变更请求已拒绝"
+        })
+    except Exception as e:
+        add_log("ERROR", f"拒绝联系人变更请求 {task_id} 失败: {str(e)}", "server_control")
+        return jsonify({
+            "status": "error",
+            "message": f"拒绝联系人变更请求失败: {str(e)}"
+        }), 500
+
+@app.route('/api/ovh/contact-change-requests/<int:task_id>/resend-email', methods=['POST', 'OPTIONS'])
+def resend_contact_change_email(task_id):
+    """重发联系人变更邮件 - POST /me/task/contactChange/{id}/resendEmail"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    client = get_ovh_client()
+    if not client:
+        return jsonify({"status": "error", "message": "未配置OVH API"}), 400
+    
+    try:
+        client.post(f'/me/task/contactChange/{task_id}/resendEmail')
+        add_log("INFO", f"成功重发联系人变更请求 {task_id} 的邮件", "server_control")
+        return jsonify({
+            "status": "success",
+            "message": "确认邮件已重新发送"
+        })
+    except Exception as e:
+        add_log("ERROR", f"重发联系人变更请求 {task_id} 邮件失败: {str(e)}", "server_control")
+        return jsonify({
+            "status": "error",
+            "message": f"重发邮件失败: {str(e)}"
+        }), 500
+
 @app.route('/api/ovh/account/sub-accounts', methods=['GET'])
 def get_sub_accounts():
     """获取子账户列表 - GET /me/subAccount"""
